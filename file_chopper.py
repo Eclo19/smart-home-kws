@@ -32,101 +32,125 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
 
     #Loop through directory
     for name in os.listdir(FULL_DATA_PATH):
-        # Ignore non-audio data
-        print(f"\nname = {name}")
-        if name.startswith(".") or name.startswith("._"):
-            print("     Not an audio file (likely a DS file), continuing...")
-            continue  # skip .DS_Store and AppleDouble
 
-        file_name = os.path.join(FULL_DATA_PATH, name)
+        #Keep track of user choices on the graphs
+        thresh_bad = True
+        duration_bad = True
 
-        # Split safely
-        root, ext = os.path.splitext(file_name)
-        ext = ext.lower().lstrip(".")
-        print(f"    Splited name succesfully")
+        #Loop through each file until a good threshold and duration is set
+        while (thresh_bad or duration_bad):
 
-        if ext.lower() not in AUDIO_EXTS:
-            print("      Not an audio file, continuing...")
-            print(f"    ext = {ext}")
-            continue
+            # Ignore non-audio data
+            print(f"\nname = {name}")
+            if name.startswith(".") or name.startswith("._"):
+                print("     Not an audio file (likely a DS file), continuing...")
+                continue  # skip .DS_Store and AppleDouble
 
-        if not os.path.isfile(file_name):
-            print("     Not a valid file, continuing...")
-            continue
+            file_name = os.path.join(FULL_DATA_PATH, name)
 
-        #Load audio data (Assumed to be normalized)
-        audio_data, sr = librosa.load(file_name, sr=None, mono=True)
-        print(f"audio_data.shape = {audio_data.shape}")
-        print(f"sr = {sr}")
+            # Split safely
+            root, ext = os.path.splitext(file_name)
+            ext = ext.lower().lstrip(".")
+            print(f"    Splited name succesfully")
 
-        # linear fade-in over first 100 samples & fade-out over last 100 samples
-        N = min(wait, audio_data.shape[0])  # handle very short clips
-        fade_in = np.linspace(0.0, 1.0, N, endpoint=True)
-        audio_data[:N] *= fade_in
-        fade_out = np.linspace(1.0, 0.0, N, endpoint=True)
-        audio_data[len(audio_data) -N:] *= fade_out
-        
-        #Loop through audio_data and find markers
-        abs_audio = np.abs(audio_data)
+            if ext.lower() not in AUDIO_EXTS:
+                print("      Not an audio file, continuing...")
+                print(f"    ext = {ext}")
+                continue
 
-        markers = []
+            if not os.path.isfile(file_name):
+                print("     Not a valid file, continuing...")
+                continue
 
-        i = max(int(wait), 1)
-        while i < len(abs_audio):
-            if abs_audio[i] > thresh:
-                # check silence just before this point
-                start = max(0, i - int(wait))
-                if np.all(abs_audio[start:i] < thresh):
-                    beg = start                                  # include the silence window
-                    end = min(beg + int(wait) + int(duration), len(abs_audio))
-                    markers.append(beg)                          # begin marker (silence start)
-                    markers.append(end)                          # end marker (silence + utterance)
-                    i = end                                      # skip past this whole span
-                    continue
-            i += 1
+            #Load audio data (Assumed to be normalized)
+            audio_data, sr = librosa.load(file_name, sr=None, mono=True)
+            print(f"audio_data.shape = {audio_data.shape}")
+            print(f"sr = {sr}")
 
-        if plot_first:
+            # linear fade-in over first 'wait' samples & fade-out over last 'wait' samples
+            N = min(wait, audio_data.shape[0])  # handle very short clips
+            fade_in = np.linspace(0.0, 1.0, N, endpoint=True)
+            audio_data[:N] *= fade_in
+            fade_out = np.linspace(1.0, 0.0, N, endpoint=True)
+            audio_data[len(audio_data) -N:] *= fade_out
+            
+            #Loop through audio_data and find markers
+            abs_audio = np.abs(audio_data)
 
-            # time axis in seconds
-            t = np.linspace(0, (len(audio_data) - 1)/sr, len(audio_data))
+            markers = []
 
-            # Simple envelope (moving average of absolute value over 'wait' samples)
-            wait_samp = int(wait)
-            dur_samp  = int(duration)
+            i = max(int(wait), 1)
+            while i < len(abs_audio):
+                if abs_audio[i] > thresh:
+                    # check silence just before this point
+                    start = max(0, i - int(wait))
+                    if np.all(abs_audio[start:i] < thresh):
+                        beg = start                                  # include the silence window
+                        end = min(beg + int(wait) + int(duration), len(abs_audio))
+                        markers.append(beg)                          # begin marker (silence start)
+                        markers.append(end)                          # end marker (silence + utterance)
+                        i = end                                      # skip past this whole span
+                        continue
+                i += 1
 
-            plt.figure(figsize=(12, 6))
-            plt.plot(t, audio_data, alpha=0.5, label="waveform")
+            if plot_first:
 
-            # Threshold 
-            plt.axhline(y=thresh, color="red", linestyle="--", label=f"threshold = {thresh:g}")
-            plt.axhline(y=-thresh, color="red", linestyle="--", alpha=0.5)
+                # time axis in seconds
+                t = np.linspace(0, (len(audio_data) - 1)/sr, len(audio_data))
 
-            # Shade windows for each detection: [beg - wait, beg] = silence, [beg, beg + duration] = utterance
-            for k in range(0, len(markers), 2):
-                beg = markers[k]
-                end = markers[k+1] if k+1 < len(markers) else min(beg + dur_samp, len(audio_data))
+                # Simple envelope (moving average of absolute value over 'wait' samples)
+                wait_samp = int(wait)
+                dur_samp  = int(duration)
 
-                # silence window checked before onset
-                s0 = max(0, beg) / sr
-                s1 = (beg + wait_samp) / sr
-                plt.axvspan(s0, s1, color="orange", alpha=0.25, label="silence window" if k == 0 else None)
+                plt.figure(figsize=(12, 6))
+                plt.plot(t, audio_data, alpha=0.5, label="waveform")
 
-                # utterance window
-                u0 = beg / sr
-                u1 = end / sr
-                plt.axvspan(u0, u1, color="green", alpha=0.25, label=f"utterance window ({(duration/sr)} s)" if k == 0 else None)
+                # Threshold 
+                plt.axhline(y=thresh, color="red", linestyle="--", label=f"threshold = {thresh:g}")
+                plt.axhline(y=-thresh, color="red", linestyle="--", alpha=0.5)
 
-            # Also draw the detection markers exactly
-            for m in markers:
-                plt.axvline(m / sr, color="green", linestyle="-", alpha=0.6)
+                # Shade windows for each detection: [beg - wait, beg] = silence, [beg, beg + duration] = utterance
+                for k in range(0, len(markers), 2):
+                    beg = markers[k]
+                    end = markers[k+1] if k+1 < len(markers) else min(beg + dur_samp, len(audio_data))
 
-            plt.xlabel("time (s)")
-            plt.ylabel("amplitude")
-            plt.title(f"Detected windows in {name}")
-            plt.legend(loc="upper right")
-            plt.tight_layout()
-            plt.show()
+                    # silence window display
+                    s0 = max(0, beg) / sr
+                    s1 = (beg + wait_samp) / sr
+                    plt.axvspan(s0, s1, color="orange", alpha=0.25, label="silence window" if k == 0 else None)
 
+                    # utterance window
+                    u0 = beg / sr
+                    u1 = end / sr
+                    plt.axvspan(u0, u1, color="green", alpha=0.25, label=f"utterance window ({(duration/sr)} s)" if k == 0 else None)
+
+                # Also draw the detection markers exactly
+                for m in markers:
+                    plt.axvline(m / sr, color="green", linestyle="-", alpha=0.6)
+
+                plt.xlabel("time (s)")
+                plt.ylabel("amplitude")
+                plt.title(f"Detected windows in {name}")
+                plt.legend(loc="upper right")
+                plt.grid(True)
+                plt.tight_layout()
+                plt.show()
+
+                #Prompt user for threshold changes
+                thres_choice = int(input("If the threshold is good, press 1. Else, press 2 and reset the threshold: ").strip())
+                if thres_choice == 1:
+                    thresh_bad = False
+                else: 
+                    thresh = float(input("New threshold value: ").strip())
+                    thresh_bad = True
+
+                #Prompt user for window changes
+                duration_choice = int(input("If the windowing is good, press 1. Else, press 2 and reset its duration: ").strip())
+                if duration_choice == 1:
+                    duration_bad = False
+                else:
+                    duration = int(float(input("New window value in seconds ").strip())*SAMPLE_RATE) #new duration (samples)
+                    duration_bad = True
 
 
 
