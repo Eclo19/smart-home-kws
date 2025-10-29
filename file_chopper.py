@@ -10,13 +10,12 @@ on the signal level. It attemopts to extract relevant utterances from speech.
 
 FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy2"
 CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy2/chops"
-SAMPLE_RATE = 22050
+SAMPLE_RATE = 44100
 DURATION = 0.75 # Duration of an utterance in seconds
 WAIT = 0.01 #10ms of silence before determins a word
 
 #Define valid audio extentions
 AUDIO_EXTS = {"wav", "m4a", "flac", "mp3", "ogg", "opus", "aiff", "aif"}
-
 
 def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DURATION), plot_first=True):
     """
@@ -56,7 +55,7 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
             continue
 
         #Load audio data (Assumed to be normalized)
-        audio_data, sr = librosa.load(file_name)
+        audio_data, sr = librosa.load(file_name, sr=None, mono=True)
         print(f"audio_data.shape = {audio_data.shape}")
         print(f"sr = {sr}")
 
@@ -115,7 +114,7 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
                 # utterance window
                 u0 = beg / sr
                 u1 = end / sr
-                plt.axvspan(u0, u1, color="green", alpha=0.25, label=f"utterance window ({int(duration/sr)})" if k == 0 else None)
+                plt.axvspan(u0, u1, color="green", alpha=0.25, label=f"utterance window ({(duration/sr)} s)" if k == 0 else None)
 
             # Also draw the detection markers exactly
             for m in markers:
