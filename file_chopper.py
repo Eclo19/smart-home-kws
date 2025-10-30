@@ -12,12 +12,12 @@ FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_co
 CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy2/chops"
 SAMPLE_RATE = 44100
 DURATION = 0.75 # Duration of an utterance in seconds
-WAIT = 0.01 #10ms of silence before determins a word
+WAIT = 0.045 # seconds of silence before we determine a word
 
 #Define valid audio extentions
 AUDIO_EXTS = {"wav", "m4a", "flac", "mp3", "ogg", "opus", "aiff", "aif"}
 
-def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DURATION), plot_first=True):
+def parse(thresh = 0.1, wait= int(SAMPLE_RATE*WAIT), duration=int(SAMPLE_RATE*DURATION), plot_first=True):
     """
     This function assumes the dataset is uniform (i.e. already sanitezed).
 
@@ -44,7 +44,10 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
             print(f"\nname = {name}")
             if name.startswith(".") or name.startswith("._"):
                 print("     Not an audio file (likely a DS file), continuing...")
+                thresh_bad = False
+                duration_bad = False
                 continue  # skip .DS_Store and AppleDouble
+                
 
             file_name = os.path.join(FULL_DATA_PATH, name)
 
@@ -56,10 +59,14 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
             if ext.lower() not in AUDIO_EXTS:
                 print("      Not an audio file, continuing...")
                 print(f"    ext = {ext}")
+                thresh_bad = False
+                duration_bad = False
                 continue
 
             if not os.path.isfile(file_name):
                 print("     Not a valid file, continuing...")
+                thresh_bad = False
+                duration_bad = False
                 continue
 
             #Load audio data (Assumed to be normalized)
@@ -67,8 +74,8 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
             print(f"audio_data.shape = {audio_data.shape}")
             print(f"sr = {sr}")
 
-            # linear fade-in over first 'wait' samples & fade-out over last 'wait' samples
-            N = min(wait, audio_data.shape[0])  # handle very short clips
+            # linear fade-in over first 'N' samples & fade-out over last 'N' samples
+            N = min(100, audio_data.shape[0])  # handle very short clips
             fade_in = np.linspace(0.0, 1.0, N, endpoint=True)
             audio_data[:N] *= fade_in
             fade_out = np.linspace(1.0, 0.0, N, endpoint=True)
@@ -102,7 +109,7 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
                 wait_samp = int(wait)
                 dur_samp  = int(duration)
 
-                plt.figure(figsize=(12, 6))
+                plt.figure(figsize=(13, 7))
                 plt.plot(t, audio_data, alpha=0.5, label="waveform")
 
                 # Threshold 
@@ -117,12 +124,12 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
                     # silence window display
                     s0 = max(0, beg) / sr
                     s1 = (beg + wait_samp) / sr
-                    plt.axvspan(s0, s1, color="orange", alpha=0.25, label="silence window" if k == 0 else None)
+                    plt.axvspan(s0, s1, color="orange", alpha=0.25, label=f"silence window ({(1000*float(wait)/SAMPLE_RATE):.2f} ms)" if k == 0 else None)
 
                     # utterance window
                     u0 = beg / sr
                     u1 = end / sr
-                    plt.axvspan(u0, u1, color="green", alpha=0.25, label=f"utterance window ({(duration/sr)} s)" if k == 0 else None)
+                    plt.axvspan(u0, u1, color="green", alpha=0.25, label=f"utterance window ({(1000*duration/sr):.2f} ms)" if k == 0 else None)
 
                 # Also draw the detection markers exactly
                 for m in markers:
@@ -133,24 +140,37 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*0.01), duration=int(SAMPLE_RATE*DU
                 plt.title(f"Detected windows in {name}")
                 plt.legend(loc="upper right")
                 plt.grid(True)
+                plt.minorticks_on()
                 plt.tight_layout()
                 plt.show()
 
-                #Prompt user for threshold changes
-                thres_choice = int(input("If the threshold is good, press 1. Else, press 2 and reset the threshold: ").strip())
-                if thres_choice == 1:
-                    thresh_bad = False
-                else: 
-                    thresh = float(input("New threshold value: ").strip())
-                    thresh_bad = True
+                # Threshold prompt with robust handling
+                try:
+                    # Anything not '1' (including empty, letters, etc.) becomes '0' → adjust
+                    thres_choice = int(input("\nIf the threshold is good, press 1. Else, press anything else to reset: ").strip() or '0')
+                except Exception:
+                    # Treat any parsing problem as "adjust"
+                    thres_choice = 0
+                finally:
+                    if thres_choice == 1:
+                        thresh_bad = False
+                    else:
+                        # Let errors propagate here if not convertible to float (as requested)
+                        thresh = float(input("    New threshold value ([0,1]): ").strip())
+                        thresh_bad = True
 
-                #Prompt user for window changes
-                duration_choice = int(input("If the windowing is good, press 1. Else, press 2 and reset its duration: ").strip())
-                if duration_choice == 1:
-                    duration_bad = False
-                else:
-                    duration = int(float(input("New window value in seconds ").strip())*SAMPLE_RATE) #new duration (samples)
-                    duration_bad = True
+                # Duration prompt with robust handling
+                try:
+                    duration_choice = int(input("If the windowing is good, press 1. Else, press anything else to reset: ").strip() or '0')
+                except Exception:
+                    duration_choice = 0
+                finally:
+                    if duration_choice == 1:
+                        duration_bad = False
+                    else:
+                        # Let errors propagate here if not convertible to float
+                        duration = int(float(input("    New window value (in seconds): ").strip()) * SAMPLE_RATE)
+                        duration_bad = True
 
 
 
