@@ -6,7 +6,11 @@ import soundfile as sf
 
 """
 This script chops long audio samples into pre-determined length windows based 
-on the signal level. It attemopts to extract relevant utterances from speech. 
+on the signal level. It attempts to extract relevant utterances from speech. 
+Each "full"recording file is parse according to specific and iterative user
+input in order to determine the best utterance extraction for every recording 
+setting. 
+
 """
 
 FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy"
