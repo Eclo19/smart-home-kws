@@ -2,6 +2,7 @@ import numpy as np
 import os
 import matplotlib.pyplot as plt
 import librosa
+import soundfile as sf
 
 """
 This script chops long audio samples into pre-determined length windows based 
@@ -171,6 +172,30 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*WAIT), duration=int(SAMPLE_RATE*DU
                         # Let errors propagate here if not convertible to float
                         duration = int(float(input("    New window value (in seconds): ").strip()) * SAMPLE_RATE)
                         duration_bad = True
+            
+        # Populate chops
+
+        # Get name
+        base = name.rsplit(".", 1)[0]
+        try:
+            label, speaker, num, full = base.split("_")
+        except ValueError:
+            # fallback if filename doesn't match the 4-part pattern
+            label, speaker, num, full = (base, "unk", "00", "seg")
+
+        # Build and write chops (iterate markers as [beg, end] pairs)
+        chop_count = 1
+        for k in range(0, len(markers), 2):
+            beg = int(markers[k])
+            end = int(markers[k + 1]) if k + 1 < len(markers) else beg
+            beg = max(0, beg)
+            end = min(len(audio_data), end)
+            if end > beg:
+                chop_name = f"{label}_{speaker}_{num}_{chop_count:02d}.wav"
+                chop_full_name = os.path.join(CHOPPED_DIR, chop_name)
+                if (end != len(audio_data)):
+                    sf.write(chop_full_name, audio_data[beg:end + 1], SAMPLE_RATE, subtype="PCM_16")
+                chop_count += 1
 
 
 
