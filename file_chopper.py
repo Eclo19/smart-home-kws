@@ -9,11 +9,11 @@ This script chops long audio samples into pre-determined length windows based
 on the signal level. It attemopts to extract relevant utterances from speech. 
 """
 
-FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy2"
+FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy"
 CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy2/chops"
 SAMPLE_RATE = 44100
 DURATION = 0.75 # Duration of an utterance in seconds
-WAIT = 0.045 # seconds of silence before we determine a word
+WAIT = 0.045 # silence buffer before threshold for a given utterance
 
 #Define valid audio extentions
 AUDIO_EXTS = {"wav", "m4a", "flac", "mp3", "ogg", "opus", "aiff", "aif"}
@@ -181,7 +181,8 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*WAIT), duration=int(SAMPLE_RATE*DU
             label, speaker, num, full = base.split("_")
         except ValueError:
             # fallback if filename doesn't match the 4-part pattern
-            label, speaker, num, full = (base, "unk", "00", "seg")
+            print("------NAME ERROR------")
+            print(f"File {name} is not in the proper data annotation convention. ")
 
         # Build and write chops (iterate markers as [beg, end] pairs)
         chop_count = 1
