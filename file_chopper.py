@@ -13,8 +13,8 @@ setting.
 
 """
 
-FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy2"
-CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy2/chops"
+FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy3"
+CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy3/chops"
 SAMPLE_RATE = 44100
 DURATION = 0.75 # s. Duration of an utterance in seconds
 WAIT = 0.05 # s. silence buffer before threshold for a given utterance
