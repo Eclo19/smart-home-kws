@@ -3,12 +3,12 @@ import numpy as np
 import soundfile as sf
 import sounddevice as sd
 import librosa
-from pydub import AudioSegment
 
 VANILLA_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy"
 AUGMENTED_DATAPATH = ""   
 SAMPLE_RATE = 44100
-DURATION = int(20 * SAMPLE_RATE) # Average duration in samples
+DURATION_S = 20
+DURATION = int(DURATION_S * SAMPLE_RATE) # Average duration in samples
 BIT_RATE = 192000
 AUDIO_EXTS = {"wav", "m4a", "flac", "mp3", "ogg", "opus", "aiff", "aif"}
 
@@ -98,6 +98,10 @@ def sanitize_vanilla_dataset(duration=DURATION):
         # Already mono+wav+sr? (length may still need adjusting)
         good_format = (ext == "wav" and audio_data.shape[0] == 1 and sr == SAMPLE_RATE)
 
+        #Continue if the format is good
+        if good_format:
+            continue
+
         # Force mono
         if len(audio_data.shape) != 1:
             audio_data = np.sum(audio_data, axis=1)/2
@@ -108,27 +112,11 @@ def sanitize_vanilla_dataset(duration=DURATION):
             audio_data = librosa.resample(audio_data, orig_sr=sr, target_sr=SAMPLE_RATE)
             print(f"    Converted {file_name}'s sample rate to {SAMPLE_RATE}")
 
-        # Trim/pad to fixed duration
-        cur_len = len(audio_data)
-        if cur_len > duration:
-            audio_data = audio_data[ :DURATION]
-            print(f"    Trimmed {file_name}'s size")
-
-        elif cur_len < duration:
-            pad_size = duration - cur_len
-            # Zero-pad (centered)
-            left = pad_size // 2
-            right = pad_size - left
-            audio_data = np.pad(audio_data, (left, right), mode='constant', constant_values=0)
-            print(f"    Extended {file_name}'s size")
-
         # Peak normalize
         peak = np.max(np.abs(audio_data))
         if peak > 0:
             audio_data = audio_data / peak
             print(f"    Normalized {file_name}'s data")
-
-        #Do not touch anything above this line.
 
         # Write helper
         def write_wav(file_name, audio_data):
