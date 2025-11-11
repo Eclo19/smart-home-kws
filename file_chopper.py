@@ -13,11 +13,11 @@ setting.
 
 """
 
-FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy3"
-CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_copy3/chops"
+FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Temperature2"
+CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Temperature2/chops"
 SAMPLE_RATE = 44100
 DURATION = 0.75 # s. Duration of an utterance in seconds
-WAIT = 0.05 # s. silence buffer before threshold for a given utterance
+WAIT = 0.25 # s. silence buffer before threshold for a given utterance
 
 #Define valid audio extentions
 AUDIO_EXTS = {"wav", "m4a", "flac", "mp3", "ogg", "opus", "aiff", "aif"}
@@ -212,7 +212,7 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*WAIT), duration=int(SAMPLE_RATE*DU
 
                         # Add fade in and out to avoid pops
                         to_write_data = audio_data[u_beg:u_end]
-                        N = min(100, to_write_data.shape[0])  # handle very short clips
+                        N = min(50, to_write_data.shape[0])  # handle very short clips
                         fade_in = np.linspace(0.0, 1.0, N, endpoint=True)
                         to_write_data[:N] *= fade_in
                         fade_out = np.linspace(1.0, 0.0, N, endpoint=True)
