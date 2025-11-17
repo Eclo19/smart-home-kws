@@ -6,15 +6,18 @@ import librosa
 import file_chopper
 from scipy.signal import lfilter, filtfilt, sosfiltfilt
 
-VANILLA_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Temperature2"
+VANILLA_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/All_Data"
 AUGMENTED_DATAPATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/augmented"   
-SAMPLE_RATE = 44100
+SAMPLE_RATE = 22050
 DURATION_S = 20
 DURATION = int(DURATION_S * SAMPLE_RATE) # Average duration in samples
 AUDIO_EXTS = {"wav", "m4a", "flac", "mp3", "ogg", "opus", "aiff", "aif"}
 
-def find_largest_length(dir_name):
 
+def find_largest_length(dir_name):
+    """
+    Returs the largest data length in samples in a given directory.
+    """
     max_size = 0.0
     for name in os.listdir(dir_name):
 
@@ -34,15 +37,16 @@ def find_largest_length(dir_name):
     
         #load audio data
         audio_data, sr = librosa.load(file_name)
+        print(f"    Loaded data of shape {audio_data.shape} and type {type(audio_data[0])}")
 
         size = 0
         #if stereo, keep track of the channel's length
         if len(audio_data.shape) != 1:
-            size = audio_data.shape[1]/sr
+            size = audio_data.shape[1]
         
         #If mono, simply get the length
         else:
-            size = len(audio_data)/sr
+            size = len(audio_data)
         
         #Keep track of the largest file
         if size > max_size:
@@ -146,9 +150,8 @@ def sanitize_vanilla_dataset(duration=DURATION):
     """
     Edit dataset in place:
       - mono
-      - 44.1 kHz
-      - .m4a
-      - length = DURATION samples
+      - SAMPLE_RATE kHz
+      - .wav
       - normalized (peak)
     """
 
@@ -180,7 +183,7 @@ def sanitize_vanilla_dataset(duration=DURATION):
             continue
 
         # Load
-        audio_data, sr = librosa.load(file_name)
+        audio_data, sr = librosa.load(file_name, sr=None)
         print(f"    Loaded data of shape {audio_data.shape} and type {type(audio_data[0])}")
         
         if False:   
@@ -496,7 +499,7 @@ def add_noise(audio_data, scale=0.35):
     return noisy_audio_data
 
 if __name__ == "__main__":
-    #sanitize_vanilla_dataset()
+    sanitize_vanilla_dataset()
 
     size = SAMPLE_RATE * 2 #2s
     #force_standard_size('/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_4', size)
@@ -652,4 +655,13 @@ if __name__ == "__main__":
 
 
     #Test augmentation
-    augment_data_set()
+    #augment_data_set()
+
+    
+
+    # Get toydataset good
+    #size = find_largest_length(VANILLA_DATA_PATH)
+    #print(f"Largest file length is ({size}), in seconds: {float(size/SAMPLE_RATE)}")
+
+    #new_size = SAMPLE_RATE # 1 second
+    #force_standard_size(VANILLA_DATA_PATH, new_size)

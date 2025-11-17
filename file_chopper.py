@@ -13,11 +13,11 @@ setting.
 
 """
 
-FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Temperature2"
-CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Temperature2/chops"
-SAMPLE_RATE = 44100
+FULL_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_Datasets/Full1"
+CHOPPED_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_Datasets/Full1/chops"
+SAMPLE_RATE = 22050
 DURATION = 0.75 # s. Duration of an utterance in seconds
-WAIT = 0.25 # s. silence buffer before threshold for a given utterance
+WAIT = 0.15 # s. silence buffer before threshold for a given utterance 
 
 #Define valid audio extentions
 AUDIO_EXTS = {"wav", "m4a", "flac", "mp3", "ogg", "opus", "aiff", "aif"}
@@ -51,8 +51,8 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*WAIT), duration=int(SAMPLE_RATE*DU
         # from here on we only handle labeled speech files
         thresh_bad = True
         duration_bad = True
-        markers = []             # ensure it's always defined
-        audio_data = None        # will be set when we load the file
+        markers = []            
+        audio_data = None        
         sr = None
 
         #Loop through each file until a good threshold and duration is set
@@ -222,7 +222,6 @@ def parse(thresh = 0.1, wait= int(SAMPLE_RATE*WAIT), duration=int(SAMPLE_RATE*DU
                         sf.write(chop_full_name, to_write_data, SAMPLE_RATE, subtype="PCM_16")
                         print(f"Writting utterance {chop_count} of {name} in {CHOPPED_DIR}")
                         chop_count += 1
-
 
 
 
