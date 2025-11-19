@@ -105,7 +105,7 @@ def build_feature_dict(dir_name=DATA_PATH, write_dir_name=FEATURE_DICT_PATH, dic
     [flat_feature_vector, label_vector] pairs to write_dir_name/dict_name.json.
     """
 
-    # Ensure output directory exists (use the function arg)
+    # Ensure output directory exists 
     os.makedirs(write_dir_name, exist_ok=True)
 
     feature_tuples = []
@@ -120,7 +120,7 @@ def build_feature_dict(dir_name=DATA_PATH, write_dir_name=FEATURE_DICT_PATH, dic
 
         print(f"name = {name}\nLooping through file {name}")
 
-        # Load at your expected SR to avoid resampling mismatches
+        # Load 
         audio_data, sr = librosa.load(file_name, sr=SAMPLE_RATE, mono=True)
         print(f"    Loaded data of shape {audio_data.shape} and type {type(audio_data[0])}")
 
@@ -156,7 +156,7 @@ def build_feature_dict(dir_name=DATA_PATH, write_dir_name=FEATURE_DICT_PATH, dic
 if __name__ == "__main__":
 
     # Visualize MFCCs
-    if True:
+    if False:
 
         test_file = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_Datasets/Chops1/red_eric_02_19.wav"
         y, sr = librosa.load(test_file, sr=SAMPLE_RATE, mono=True)
@@ -227,4 +227,27 @@ if __name__ == "__main__":
         plt.tight_layout()
         plt.show()
 
-    build_feature_dict()
+    # build feature dictionaries
+    if False:
+
+        # Vanilla Train
+        build_feature_dict(dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/train", 
+                           write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts/train", 
+                           dict_name="train_feature_dict")
+        
+        # Augmented Train
+        build_feature_dict(dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/train_augmented", 
+                           write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts/train_augmented", 
+                           dict_name="train_augmented_feature_dict")
+        
+        # Test 
+        build_feature_dict(dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/test", 
+                           write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts/test", 
+                           dict_name="test_feature_dict")
+        
+        # Validation 
+        build_feature_dict(dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/val", 
+                           write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts/val", 
+                           dict_name="val_feature_dict")
+        
+    pass
