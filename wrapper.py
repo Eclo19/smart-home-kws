@@ -3,19 +3,21 @@ import shutil
 import numpy as np
 import soundfile as sf
 import librosa
-import data_augmentation as da
 import json
+import data_augmentation
+from feature_extraction import build_feature_dict
 
 """
 This script contains helper functions for moving, removing, splitting, and loading 
 already-cleaned and processed audio files. 
 """
 
-DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Mixed_Data"
-TRAIN_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/train"
-TEST_PATH  = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/test"
-VAL_PATH   = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/val"
+DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Raw_Mixed_Chops"
+TRAIN_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/train"
+TEST_PATH  = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/test"
+VAL_PATH   = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/val"
 SAMPLE_RATE = 22050
+SIZE = SAMPLE_RATE*2
 
 # Used only for label->index; we derive the label string from the filename
 LABEL_MAPPING = {
@@ -23,6 +25,125 @@ LABEL_MAPPING = {
     'time': 5, 'temperature': 6, 'unknown': 7, 'noise': 8
 }
 AUDIO_EXTS = {".wav", ".m4a", ".flac", ".mp3", ".ogg", ".opus", ".aiff", ".aif"}
+
+def build_full_dataset(augmented=True, stats=False):
+    """
+    Builds split dictionaries from a directory containing a mixture of all chops.
+    If augmented is true, augments the training data. This functino takes several 
+    minutes to run. 
+    """
+
+    # Sanitize files
+    data_augmentation.VANILLA_DATA_PATH = DATA_PATH
+    data_augmentation.sanitize_vanilla_dataset()
+
+    # Clean directory
+    clean_directory(directory=DATA_PATH)
+
+
+    # Force standard size
+    force_standard_size(dirname=DATA_PATH, size=SIZE)
+
+    if stats:
+
+        # --- Get data stats: ---
+
+        # Number of points
+        total_points = 0
+
+        # Number of points per label
+        label_freq = {
+            'red': 0, 'green': 0, 'blue': 0, 'white': 0, 'off': 0,
+            'time': 0, 'temperature': 0, 'unknown': 0, 'noise': 0
+        }
+
+        # Flags
+        labels_good = True   # all labels recognized?
+        sizes_good = True    # all lengths consistent?
+
+        for name in os.listdir(DATA_PATH):
+
+            # Skip hidden / metadata files
+            if name.startswith(".") or name.startswith("._"):
+                continue
+
+            root, ext = os.path.splitext(name)
+            ext = ext.lower()
+            if ext not in AUDIO_EXTS:
+                # Not an audio file we care about
+                continue
+
+            # ---- Label check ----
+            label = root.split("_")[0]
+
+            if label in label_freq:
+                label_freq[label] += 1
+            else:
+                print(
+                    f"\nWARNING: Found a mislabelled or unexpected file: "
+                    f"{name} (label='{label}')"
+                )
+                labels_good = False
+
+            # ---- Size check ----
+            file_path = os.path.join(DATA_PATH, name)
+            audio_data, sr = librosa.load(file_path, sr=None)  # raw length as stored
+            curr_size = len(audio_data)
+
+            if curr_size != SIZE:
+                print(
+                    f"WARNING: File of wrong size: {name} has "
+                    f"{curr_size} samples, expected {SIZE}"
+                )
+                sizes_good = False
+
+            total_points += 1
+        
+        print("\n--- Data stats ---\n")
+        print(f"Number of points (audio files counted): {total_points}")
+        print(f"Label-frequency dictionary:\n{label_freq}")
+        print(f"Determined input size (in samples): {SIZE}")
+        print(f"All labels valid     : {labels_good}")
+        print(f"All sizes consistent : {sizes_good}")
+
+    # Split the dataset
+    split_dataset(data_dir=DATA_PATH)
+
+    # Augment
+    if augmented:
+        data_augmentation.VANILLA_DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/train"
+        data_augmentation.AUGMENTED_DATAPATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/train_augmented"
+        data_augmentation.augment_data_set(roll=True)
+
+        print(f"\nAugmented training data.\n")
+
+
+    # Build feature dicts 
+
+        # Vanilla Train
+        build_feature_dict(dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/train", 
+                           write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts2/train", 
+                           dict_name="train_feature_dict")
+        
+        # Augmented Train
+        build_feature_dict(dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/train_augmented", 
+                           write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts2/train_augmented", 
+                           dict_name="train_augmented_feature_dict")
+        
+        # Test 
+        build_feature_dict(dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/test", 
+                           write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts2/test", 
+                           dict_name="test_feature_dict")
+        
+        # Validation 
+        build_feature_dict(dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data2/val", 
+                           write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts2/val", 
+                           dict_name="val_feature_dict")
+        
+    print("\n Built full dataset of feature dictionaries.\n")
+
+    return
+
 
 def write_wav(file_name, audio_data):
     """
@@ -459,19 +580,46 @@ def remove_n_random(directory, n=100):
 
 import os
 
-def rename_points_per_label(directory, label):
+def rename_points_per_label(directory):
     """
-    In a given `directory` corresponding to a specific `label`, rename any .wav file
-    that does NOT follow the convention:  '{label}_RESTOFNAME'
-    
-    Mis-labeled files are renamed to: '{label}_mistery_NUM.wav', where NUM runs from
-    1 to N in the order they are found during the directory scan.
+    In a given `directory` containing mixed labels, rename any .wav file that does NOT
+    follow the convention: 'label_speaker_num...' where:
+        - 'label' is one of LABEL_MAPPING.keys()
+        - there are at least 3 underscore-separated parts
+
+    Mis-labeled / malformed files are renamed to:
+        'unknown_mistery_NUM.wav',
+    where NUM runs from 1 upward in the order they are found.
+
+
     """
-    print(f"Renaming poorly labeled files in '{directory}' for label '{label}'...")
+    print(f"Renaming poorly labeled files in '{directory}'...")
+
+    # Use the declared mapping
+    allowed_labels = set(LABEL_MAPPING.keys())
+    unknown_label = "unknown"
+    if unknown_label not in allowed_labels:
+        raise ValueError(f"{unknown_label!r} must be a key in LABEL_MAPPING.")
 
     mystery_count = 0
-    expected_prefix = f"{label}_"
 
+    # First, figure out how many unknown_mistery_* already exist to avoid collisions
+    for name in os.listdir(directory):
+        if name.startswith(".") or name.startswith("._"):
+            continue
+        stem, ext = os.path.splitext(name)
+        if ext.lower() != ".wav":
+            continue
+        parts = stem.split("_")
+        if (
+            len(parts) >= 3 and
+            parts[0] == unknown_label and
+            parts[1] == "mistery" and
+            parts[2].isdigit()
+        ):
+            mystery_count = max(mystery_count, int(parts[2]))
+
+    # Now scan all files and rename the "bad" ones
     for name in os.listdir(directory):
         old_path = os.path.join(directory, name)
 
@@ -488,24 +636,40 @@ def rename_points_per_label(directory, label):
         if ext.lower() != ".wav":
             continue
 
-        # If it already follows label_RESTOFNAME, leave it alone
-        if name.startswith(expected_prefix):
+        parts = stem.split("_")
+
+        # Already a properly-formed unknown_mistery_XX from a previous run: leave it
+        if (
+            len(parts) >= 3 and
+            parts[0] == unknown_label and
+            parts[1] == "mistery" and
+            parts[2].isdigit()
+        ):
             continue
 
-        # Otherwise, it's a "mistery" file for this label
+        # Check for good label_speaker_num... pattern:
+        #   - label in LABEL_MAPPING
+        #   - at least 3 parts (label, speaker, num/whatever)
+        if len(parts) >= 3 and parts[0] in allowed_labels:
+            # Good file, keep as is
+            continue
+
+        # Otherwise, it's malformed/mislabelled -> rename to unknown_mistery_NUM.wav
         mystery_count += 1
-        new_name = f"{label}_mistery_{mystery_count}.wav"
+        new_name = f"{unknown_label}_mistery_{mystery_count}.wav"
         new_path = os.path.join(directory, new_name)
+
+        # Just in case, avoid collision by bumping NUM until free
+        while os.path.exists(new_path):
+            mystery_count += 1
+            new_name = f"{unknown_label}_mistery_{mystery_count}.wav"
+            new_path = os.path.join(directory, new_name)
 
         print(f"  Renaming '{name}' -> '{new_name}'")
         os.rename(old_path, new_path)
 
-    print(f"Done. Relabeled {mystery_count} file(s) in '{directory}' as '{label}_mistery_NUM.wav'.")
+    print(f"Done. Relabeled {mystery_count} file(s) in '{directory}' as 'unknown_mistery_NUM.wav'.")
     return
-
-import os
-import json
-import numpy as np
 
 def wrapper(dirname, augmented=False):
     """
@@ -637,7 +801,7 @@ if __name__ == "__main__":
     if False:
         split_dataset()
 
-    if True:
+    if False:
         (x_train, y_train), (x_test, y_test), (x_val, y_val) = wrapper(
             dirname="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts/", 
             augmented=False)
@@ -650,5 +814,9 @@ if __name__ == "__main__":
 
         print(f"Val's x shape: {x_val.shape}")
         print(f"Val's y shape: {y_val.shape}")
+
+    # Test build dataset
+    if True:
+        build_full_dataset()
 
     pass

@@ -14,6 +14,8 @@ This file defines the feature extraction processes and builds JSON feature dicti
 DATA_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_Datasets/Chops1"
 FEATURE_DICT_PATH = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_Datasets/dict1"
 SAMPLE_RATE = 22050  # default target SR for feature extraction
+N_MFCC = 32
+T_FRAMES = 154
 
 def extract_mfccs(
     audio_data: np.ndarray,
@@ -250,4 +252,11 @@ if __name__ == "__main__":
                            write_dir_name="/Users/ericoliviera/Desktop/Data/smart-home-ksw/Feature_dicts/val", 
                            dict_name="val_feature_dict")
         
+    # Test MFCC
+    if False:
+        audio_data, sr = librosa.load("/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/val/blue_anna_01_01.wav", 
+                                      sr=None)
+        mfccs = extract_mfccs(audio_data=audio_data)
+        print(f"MFCCs shape = {mfccs.shape}")
+
     pass

@@ -114,7 +114,7 @@ def sanitize_vanilla_dataset():
     print(f"\n\nSuccesfully sanitized all files in {VANILLA_DATA_PATH}\n\n")
 
 
-def augment_data_set():
+def augment_data_set(roll=True):
     """
     Generates an artificially augmented dataset in the global path 'AUGMENTED_DATAPATH' from
     files in the global 'VANILLA_DATA_PATH' by calling all the relevant transformations.
@@ -191,8 +191,58 @@ def augment_data_set():
         nz_out = os.path.join(AUGMENTED_DATAPATH, f"{root_name}_nz.wav")
         write_wav(nz_out, nz_audio_data)
 
-    return
+        # Rolling the array
+        if roll:
 
+            min_roll = 200
+
+            # Find zero-padded regions by looking at first/last non-zero samples
+            eps = 1e-8
+            nonzero_idx = np.where(np.abs(audio_data) > eps)[0]
+
+            if nonzero_idx.size == 0:
+                print("    (3) All-zero file, skipping roll augmentations...")
+            else:
+                first_nz = nonzero_idx[0]
+                last_nz  = nonzero_idx[-1]
+
+                left_pad  = first_nz
+                right_pad = len(audio_data) - 1 - last_nz
+                max_zero_padded_length = max(left_pad, right_pad)
+
+                print(f"    Zero padding: left={left_pad}, right={right_pad}, "
+                      f"max_zero_padded_length={max_zero_padded_length}")
+
+                # Require at least 400 samples of zero padding to roll into
+                if max_zero_padded_length <= min_roll:
+                    print("    (4) Not enough zero padding to do meaningful roll, skipping...")
+                else:
+                    low = min_roll
+                    high = max_zero_padded_length  # [400, max_zero_padded_length)
+
+                    # Roll to the right x2
+                    rr_constant = np.random.randint(low, high)
+                    rolled_right_audio_data = np.roll(audio_data, rr_constant)
+                    rr_out = os.path.join(AUGMENTED_DATAPATH, f"{root_name}_rr.wav")
+                    write_wav(rr_out, rolled_right_audio_data)
+
+                    rr_constant = np.random.randint(low, high)
+                    rolled_right_audio_data = np.roll(audio_data, rr_constant)
+                    rr_out = os.path.join(AUGMENTED_DATAPATH, f"{root_name}_rr2.wav")
+                    write_wav(rr_out, rolled_right_audio_data)
+
+                    # Roll to the left x2
+                    rl_constant = -np.random.randint(low, high)
+                    rolled_left_audio_data = np.roll(audio_data, rl_constant)
+                    rl_out = os.path.join(AUGMENTED_DATAPATH, f"{root_name}_rl.wav")
+                    write_wav(rl_out, rolled_left_audio_data)
+
+                    rl_constant = -np.random.randint(low, high)
+                    rolled_left_audio_data = np.roll(audio_data, rl_constant)
+                    rl_out = os.path.join(AUGMENTED_DATAPATH, f"{root_name}_rl2.wav")
+                    write_wav(rl_out, rolled_left_audio_data)
+
+    return
 
 def low_pass(audio_data, path="/Users/ericoliviera/Desktop/My_Repositories/smart-home-kws/Filters/lp7.csv"):
 
@@ -366,5 +416,195 @@ def add_noise(audio_data, scale=0.35):
 
 if __name__ == "__main__":
 
-    pass
+    #force_standard_size('/Users/ericoliviera/Desktop/Data/smart-home-ksw/Toy_dataset_4', size)
+
+    # Test lowpass
+    if False:
+
+        for name in os.listdir(VANILLA_DATA_PATH):
+
+            file_name = os.path.join(VANILLA_DATA_PATH, name)
+
+            # Ignore non-audio data
+            print(f"\nname = {name}")
+            if name.startswith(".") or name.startswith("._"):
+                print("    (1) Not an audio file, continuing...")
+                continue  # skip .DS_Store and AppleDouble
+
+            audio_data, sr = librosa.load(file_name, sr=None, mono=True)
+
+            filt_audio_data = low_pass(audio_data)
+
+            print(f"\nNow playing vanilla and filtered {name}:\n ")
+
+            sd.play(audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+            sd.play(filt_audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+    # Test highpass
+    if False:
+
+        for name in os.listdir(VANILLA_DATA_PATH):
+
+            file_name = os.path.join(VANILLA_DATA_PATH, name)
+
+            # Ignore non-audio data
+            print(f"\nname = {name}")
+            if name.startswith(".") or name.startswith("._"):
+                print("    (1) Not an audio file, continuing...")
+                continue  # skip .DS_Store and AppleDouble
+
+            audio_data, sr = librosa.load(file_name, sr=None, mono=True)
+
+            filt_audio_data = high_pass(audio_data)
+
+            print(f"Now playing vanilla and filtered {name}:\n ")
+
+            sd.play(audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+            sd.play(filt_audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+    # Test bandpass
+    if False:
+
+        for name in os.listdir(VANILLA_DATA_PATH):
+
+            file_name = os.path.join(VANILLA_DATA_PATH, name)
+
+            # Ignore non-audio data
+            print(f"\nname = {name}")
+            if name.startswith(".") or name.startswith("._"):
+                print("    (1) Not an audio file, continuing...")
+                continue  # skip .DS_Store and AppleDouble
+
+            audio_data, sr = librosa.load(file_name, sr=None, mono=True)
+
+            filt_audio_data = band_pass(audio_data)
+
+            print(f"Now playing vanilla and filtered {name}:\n ")
+
+            sd.play(audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+            sd.play(filt_audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+
+    # Test pitch_up
+    if False:
+
+        for name in os.listdir(VANILLA_DATA_PATH):
+
+            file_name = os.path.join(VANILLA_DATA_PATH, name)
+
+            # Ignore non-audio data
+            print(f"\nname = {name}")
+            if name.startswith(".") or name.startswith("._"):
+                print("    (1) Not an audio file, continuing...")
+                continue  # skip .DS_Store and AppleDouble
+
+            audio_data, sr = librosa.load(file_name, sr=None, mono=True)
+
+            shifted_audio_data = pitch_up(audio_data)
+
+            print(f"Now playing vanilla and pitch-shifted {name}:\n ")
+
+            sd.play(audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+            sd.play(shifted_audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+    # Test pitch_down
+    if False:
+
+        for name in os.listdir(VANILLA_DATA_PATH):
+
+            file_name = os.path.join(VANILLA_DATA_PATH, name)
+
+            # Ignore non-audio data
+            print(f"\nname = {name}")
+            if name.startswith(".") or name.startswith("._"):
+                print("    (1) Not an audio file, continuing...")
+                continue  # skip .DS_Store and AppleDouble
+
+            audio_data, sr = librosa.load(file_name, sr=None, mono=True)
+
+            shifted_audio_data = pitch_down(audio_data)
+
+            print(f"Now playing vanilla and pitch-shifted {name}:\n ")
+
+            sd.play(audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+            sd.play(shifted_audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+    
+    #Test red noise
+    if False:
+        for name in os.listdir(VANILLA_DATA_PATH):
+
+            file_name = os.path.join(VANILLA_DATA_PATH, name)
+
+            # Ignore non-audio data
+            print(f"\nname = {name}")
+            if name.startswith(".") or name.startswith("._"):
+                print("    (1) Not an audio file, continuing...")
+                continue  # skip .DS_Store and AppleDouble
+
+            audio_data, sr = librosa.load(file_name, sr=None, mono=True)
+            noisy_audio = add_noise(audio_data)
+
+            print(f"Now playing vanilla and noisy {name}:\n ")
+
+            sd.play(audio_data, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+            sd.play(noisy_audio, samplerate=SAMPLE_RATE)
+            sd.wait()
+
+    # Sanitize all data points per label
+    labels = ["red", "green", "blue", "white", "off", "time", "temperature", "unknown", "noise"]
+    if False:
+        base_path = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Full_Data"
+
+        for l in labels:
+            print(f"\n---Sanitizing {l}: \n")
+            curr_label_path = os.path.join(base_path, l)
+            VANILLA_DATA_PATH = curr_label_path
+            sanitize_vanilla_dataset()
+
+    # Find largest audio data per label
+    size = 0
+    if False:
+        base_path = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Full_Data"
+        largest_lengths = []
+        for l in labels:
+            curr_label_path = os.path.join(base_path, l)
+            largest_len = find_largest_length(dir_name=curr_label_path)
+            largest_lengths.append(int(largest_len))
+        print("\n Printing largest lengths: \n",largest_lengths)
+        print(f"In order: {sorted(largest_lengths)}") # [11025, 15434, 15434, 18301, 18742, 19845, 23624, 35676, 66150]
+        size = sorted(largest_lengths)[-2]
+        print(f"Size = {size}") # 35676 (from unknown)
+
+
+    # Force standard size in all files in the data
+    if False:
+        base_path = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Full_Data"
+
+        for l in labels:
+            curr_label_path = os.path.join(base_path, l)
+            force_standard_size(dirname=curr_label_path, size=int(35676*1.1)) # increase size by 10% for safety
+            # All files will be of size 39243.
+
+    # Augment training dataset
+    if False:
+        augment_data_set()
+
+    print("All good")
     
