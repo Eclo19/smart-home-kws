@@ -13,6 +13,7 @@ DATA_TYPE = np.float32
 INPUT_LENGTH = 39243  # number of samples expected by your MFCC setup
 MODEL_PATH = "Models/best_cnn_run4_padrobust-epoch15-valloss0.0025-valacc1.0000.keras"
 TEST_DIR = "/Users/ericoliviera/Desktop/Data/smart-home-ksw/Split_data/test"
+THRESH = 0.12
 
 # Mirror the training-time constants
 N_MFCC   = feature_extraction.N_MFCC
@@ -123,6 +124,62 @@ def plot_signal_and_loudest_window_leaky(
         window[-num_samples:] *= fade_out
 
     return window
+
+
+def zero_out(audio_data, threshold=THRESH, fade_len=1000):
+    """
+    Force artificial silence at beginning/end and keep the middle region where
+    |audio| >= threshold, with a linear fade in/out.
+
+    - Anything below `threshold` is considered silence.
+    - We find the first and last sample above `threshold`.
+    - Everything before that first index and after that last index is set to 0.
+    - The middle (non-silent) region is kept, but we apply:
+        * a fade-in over `fade_len` samples at the start of the region
+        * a fade-out over `fade_len` samples at the end of the region
+    """
+
+    # Ensure float32 copy so we don't modify the original in-place
+    x = np.asarray(audio_data, dtype=np.float32).copy()
+    n = len(x)
+
+    if n == 0:
+        return x
+
+    # Find indices where the signal is above threshold
+    non_silent_idx = np.where(np.abs(x) >= threshold)[0]
+
+    # If everything is below threshold, just return all zeros
+    if non_silent_idx.size == 0:
+        return np.zeros_like(x, dtype=np.float32)
+
+    first = int(non_silent_idx[0])
+    last  = int(non_silent_idx[-1])
+
+    # Zero out everything before and after the "active" region
+    x[:first] = 0.0
+    x[last+1:] = 0.0
+
+    # Length of the active region
+    active_len = last - first + 1
+
+    # Fade length cannot exceed half the active region
+    L = min(fade_len, active_len // 2)
+    if L > 0:
+        # Linear fades
+        fade_in = np.linspace(0.0, 1.0, L, dtype=np.float32)
+        fade_out = np.linspace(1.0, 0.0, L, dtype=np.float32)
+
+        # Apply fade in on the first L samples of the active region
+        x[first:first + L] *= fade_in
+
+        # Apply fade out on the last L samples of the active region
+        x[last - L + 1:last + 1] *= fade_out
+
+    return x
+
+
+
 if __name__ == "__main__":
 
     # Check devices
@@ -208,6 +265,9 @@ if __name__ == "__main__":
         else:
             print("Silent input (max amplitude = 0). Skipping.")
             continue
+
+        # Zero parts under threshold 
+        input_window = zero_out(input_window)
 
         # Plot for sanity check
         plt.figure(figsize=(8, 6))
