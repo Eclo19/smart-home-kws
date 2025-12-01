@@ -19,7 +19,6 @@ THRESH = 0.12
 N_MFCC   = feature_extraction.N_MFCC
 T_FRAMES = feature_extraction.T_FRAMES
 
-
 def leaky_integrator(input_signal, dt, tau):
     """
     Simulates a leaky integrator over a 1D input signal.
@@ -50,7 +49,8 @@ def plot_signal_and_loudest_window_leaky(
     sr,
     tau_ms=200.0,
     win_size=INPUT_LENGTH,
-    title="Signal + Leaky Integrator Loudest Window"
+    title="Signal + Leaky Integrator Loudest Window", 
+    plot=False
 ):
     """
     Plot a signal, its leaky-integrated energy, and highlight the region
@@ -100,17 +100,19 @@ def plot_signal_and_loudest_window_leaky(
         leaky_scaled = leaky_out
 
     # 6) Plot
-    plt.figure(figsize=(12, 6))
-    plt.plot(t, audio_data, label="Signal", linewidth=1)
-    plt.plot(t, leaky_scaled, label="Leaky integrator (scaled)", linewidth=2)
-    plt.axvspan(t_start, t_end, alpha=0.3, label="Detected loudest window")
-    plt.xlabel("Time [s]")
-    plt.ylabel("Amplitude / (scaled curves)")
-    plt.title(title)
-    plt.legend()
-    plt.grid(True)
-    plt.tight_layout()
-    plt.show()
+
+    if plot:
+        plt.figure(figsize=(12, 6))
+        plt.plot(t, audio_data, label="Signal", linewidth=1)
+        plt.plot(t, leaky_scaled, label="Leaky integrator (scaled)", linewidth=2)
+        plt.axvspan(t_start, t_end, alpha=0.3, label="Detected loudest window")
+        plt.xlabel("Time [s]")
+        plt.ylabel("Amplitude / (scaled curves)")
+        plt.title(title)
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
 
     # 7) Extract window
     window = audio_data[start:end].astype(np.float32)
@@ -126,41 +128,44 @@ def plot_signal_and_loudest_window_leaky(
     return window
 
 
-def zero_out(audio_data, threshold=THRESH, fade_len=1000):
+def zero_out(audio_data, threshold=THRESH, fade_len=300, wait_ms=80, sr=SAMPLE_RATE):
     """
     Force artificial silence at beginning/end and keep the middle region where
     |audio| >= threshold, with a linear fade in/out.
 
-    - Anything below `threshold` is considered silence.
-    - We find the first and last sample above `threshold`.
-    - Everything before that first index and after that last index is set to 0.
-    - The middle (non-silent) region is kept, but we apply:
-        * a fade-in over `fade_len` samples at the start of the region
-        * a fade-out over `fade_len` samples at the end of the region
+    - Anything below `threshold` is considered silence to find the true
+      non-silent region.
+    - We find the first and last sample above `threshold` (true nonzero region).
+    - `wait_ms` (in milliseconds) defines how much time BEFORE and AFTER
+      that true region is *kept* (not zeroed out), even if it is below threshold.
+    - Everything before (first - wait) and after (last + wait) is set to 0.
+    - Fades apply ONLY to the true nonzero part [first:last]:
+        * fade-in over `fade_len` samples at the start (from `first`)
+        * fade-out over `fade_len` samples at the end (up to `last`)
     """
 
     # Ensure float32 copy so we don't modify the original in-place
     x = np.asarray(audio_data, dtype=np.float32).copy()
     n = len(x)
 
-    if n == 0:
-        return x
-
     # Find indices where the signal is above threshold
     non_silent_idx = np.where(np.abs(x) >= threshold)[0]
 
-    # If everything is below threshold, just return all zeros
-    if non_silent_idx.size == 0:
-        return np.zeros_like(x, dtype=np.float32)
+    first = int(non_silent_idx[0])   # start of true non-silent region
+    last  = int(non_silent_idx[-1])  # end of true non-silent region
 
-    first = int(non_silent_idx[0])
-    last  = int(non_silent_idx[-1])
+    # Convert wait from ms to samples
+    wait_samples = int(round(wait_ms * sr / 1000.0))
 
-    # Zero out everything before and after the "active" region
-    x[:first] = 0.0
-    x[last+1:] = 0.0
+    # Extended region we keep (may include some below-threshold samples)
+    ext_start = max(0, first - wait_samples)
+    ext_end   = min(n - 1, last + wait_samples)
 
-    # Length of the active region
+    # Zero out everything outside the extended region
+    x[:ext_start] = 0.0
+    x[ext_end + 1:] = 0.0
+
+    # Length of the true active (non-silent) region
     active_len = last - first + 1
 
     # Fade length cannot exceed half the active region
@@ -170,14 +175,13 @@ def zero_out(audio_data, threshold=THRESH, fade_len=1000):
         fade_in = np.linspace(0.0, 1.0, L, dtype=np.float32)
         fade_out = np.linspace(1.0, 0.0, L, dtype=np.float32)
 
-        # Apply fade in on the first L samples of the active region
+        # Apply fade in on the first L samples of the TRUE non-silent region
         x[first:first + L] *= fade_in
 
-        # Apply fade out on the last L samples of the active region
+        # Apply fade out on the last L samples of the TRUE non-silent region
         x[last - L + 1:last + 1] *= fade_out
 
     return x
-
 
 
 if __name__ == "__main__":
@@ -310,3 +314,4 @@ if __name__ == "__main__":
         pred_label = idx_to_label[pred_idx]
 
         print(f"\n--- Prediction: {pred_label} ---\n")
+
