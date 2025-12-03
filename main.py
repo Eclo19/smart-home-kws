@@ -1,32 +1,37 @@
 import numpy as np
-import pyaudio
-import ctypes
 from typing import Optional
-from ctypes import cdll, CFUNCTYPE, c_char_p, c_int
 import tflite_runtime.interpreter as tflite
 import librosa
+import sounddevice as sd
+import RPi.GPIO as GPIO
+import datetime
 
-# ==== Global constants ====
+import warnings
 
-# Audio / model I/O
-SAMPLE_RATE   = 22050           # Must match training
-INPUT_LENGTH  = 39243           # Length used when building MFCCs
-THRESH        = 0.12            # Silence threshold for zero_out()
-DATA_TYPE     = np.float32
+# Hide the “smallest subnormal is zero” warnings from numpy.getlimits
+warnings.filterwarnings(
+    "ignore",
+    message="The value of the smallest subnormal",
+    category=UserWarning,
+    module="numpy.core.getlimits"
+)
 
-# PyAudio / capture settings
-CHUNK          = 1024
-FORMAT         = pyaudio.paInt16
-CHANNELS       = 1
-RATE           = SAMPLE_RATE    # Keep this equal to SAMPLE_RATE
-RECORD_SECONDS = 4              # Duration of each capture window (seconds)
 
-# TFLite model path on the Pi (same dir as this script)
+# Audio Processing / model I/O
+SAMPLE_RATE = 22050           # Must match training
+DATA_TYPE   = np.float32
+LENGTH_S    = 4               # seconds
+BUFFER_LEN  = LENGTH_S * SAMPLE_RATE
 MODEL_PATH = "cnn_kws_model.tflite"
-
-# Mirror training-time MFCC dimensions
 N_MFCC   = 32
 T_FRAMES = 154
+INPUT_LENGTH = 39243 # samples
+THRESH        = 0.12            # Silence threshold for zero_out()
+
+# --- GPIO pin setup ---
+RED_PIN = 10
+GREEN_PIN = 9
+BLUE_PIN = 11
 
 # Helpers
 
@@ -228,30 +233,42 @@ def zero_out(audio_data, threshold=THRESH, fade_len=300, wait_ms=80, sr=SAMPLE_R
 
     return x
 
+# LED 
+
+# Set pin 
+GPIO.setmode(GPIO.BCM)
+
+# Setup pins as outputs
+GPIO.setup(RED_PIN, GPIO.OUT)
+GPIO.setup(GREEN_PIN, GPIO.OUT)
+GPIO.setup(BLUE_PIN, GPIO.OUT)
+
+# --- Set up PWM on each channel ---
+FREQ = 1000  # 1 kHz PWM frequency
+red = GPIO.PWM(RED_PIN, FREQ)
+green = GPIO.PWM(GREEN_PIN, FREQ)
+blue = GPIO.PWM(BLUE_PIN, FREQ)
+
+# Start PWM with 0% duty cycle (off)
+red.start(0)
+green.start(0)
+blue.start(0)
+
+def set_color(r, g, b):
+    """Set RGB LED color using 0-100% duty cycle for each channel"""
+    red.ChangeDutyCycle(r)
+    green.ChangeDutyCycle(g)
+    blue.ChangeDutyCycle(b)
 
 
 if __name__ == "__main__":
+        
+    print("Starting main routine...\n")
 
-    # ALSA ERROR HANDLER (from test_microphone.py) 
-    ERROR_HANDLER_FUNC = CFUNCTYPE(
-        None,
-        c_char_p, c_int, c_char_p, c_int, c_char_p
-    )
+    # Preallocate buffer: 1D mono signal
+    buffer = np.zeros(BUFFER_LEN, dtype=DATA_TYPE)
 
-    def py_error_handler(filename, line, function, err, fmt):
-        # Swallow ALSA errors
-        return
-
-    try:
-        asound = cdll.LoadLibrary("libasound.so")
-        c_error_handler = ERROR_HANDLER_FUNC(py_error_handler)
-        asound.snd_lib_error_set_handler(c_error_handler)
-        print("ALSA error handler installed.")
-    except OSError:
-        asound = None
-        print("Could not load libasound.so; continuing without custom error handler.")
-
-    # ---- LOAD TFLITE MODEL ----
+        # ---- LOAD TFLITE MODEL ----
     print(f"\nLoading TFLite model from: {MODEL_PATH}")
     interpreter = tflite.Interpreter(model_path=MODEL_PATH)
     interpreter.allocate_tensors()
@@ -274,104 +291,133 @@ if __name__ == "__main__":
     }
     idx_to_label = {v: k for k, v in label_mapping.items()}
 
-    # ---- AUDIO + INFERENCE LOOP ----
-    p = pyaudio.PyAudio()
-    stream = None
+    # --- Print devices ---
+    devices = sd.query_devices()
+    print("Available devices:\n")
+    for idx, dev in enumerate(devices):
+        print(f"{idx}: {dev['name']}  (max input channels: {dev['max_input_channels']})")
 
-    try:
-        stream = p.open(
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=RATE,
-            input=True,
-            frames_per_buffer=CHUNK
+    # Default device info
+    default_input, default_output = sd.default.device
+    print("\nDefault input device index:", default_input)
+    print("Default input device info:", devices[default_input])
+
+    while True:
+
+        # --- Record into buffer using InputStream ---
+        print(f"\nRecording {LENGTH_S} seconds of audio at {SAMPLE_RATE} Hz...\n")
+
+        frames_to_read = BUFFER_LEN
+        offset = 0
+        blocksize = 1024  # you can tweak this
+
+        # Open an InputStream on the default input device
+        with sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype=DATA_TYPE,
+        ) as stream:
+
+            while offset < frames_to_read:
+                # How many frames to grab in this iteration
+                frames = min(blocksize, frames_to_read - offset)
+
+                data, overflowed = stream.read(frames)
+                if overflowed:
+                    print("Warning: overflow detected while recording")
+
+                # data.shape = (frames, channels), channels=1 here
+                buffer[offset:offset+frames] = data[:, 0]
+                offset += frames
+
+        print("Recording done. ")
+
+        # Get window
+        input_window = extract_loudest_window_leaky(
+            audio_data=buffer,
+            sr=SAMPLE_RATE,
+            tau_ms=200.0,
         )
-        print("PyAudio input stream opened.")
 
-        while True:
-            print("\nRecording from microphone...\n")
+        print("Got window.")
 
-            frames = []
-            num_chunks = int(RATE / CHUNK * RECORD_SECONDS)
+        # Normalize 
+        print("Normalizing...")
+        max_val = np.max(np.abs(input_window))
+        if max_val > 0:
+            input_window = input_window / max_val
+            print("Normalized.")
+        else:
+            print("Silent input (max amplitude = 0). Skipping.")
 
-            for _ in range(num_chunks):
-                data = stream.read(CHUNK, exception_on_overflow=False)
-                frames.append(data)
+        # Zero out 
+        print("Zeroing out...")
+        input_window = zero_out(input_window, threshold=THRESH, sr=SAMPLE_RATE)
+        print("Zerod out.")
+        
+        print("Getting MFCCs...")
+        # ---- MFCC extraction ----
+        mfccs = extract_mfccs(audio_data=input_window)
+        print("Got MFCCs.")
 
-            print("Recording done. Got", len(frames), "chunks.")
+        if mfccs.shape != (N_MFCC, T_FRAMES):
+            print(f"Skipping: unexpected MFCC shape {mfccs.shape}")
+            
 
-            # ---- Convert frames -> mono float32 ----
-            audio_bytes = b"".join(frames)
-            mono = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32)
+        print(f"MFCCs shape = {mfccs.shape}")
 
-            # ---- Leaky-integrator loudest window ----
-            input_window = extract_loudest_window_leaky(
-                audio_data=mono,
-                sr=SAMPLE_RATE,
-                tau_ms=200.0,
-            )
+        # Shape tensor
+        input_matrix = mfccs.reshape(
+            1, N_MFCC, T_FRAMES, 1
+        ).astype(DATA_TYPE)
 
-            print("Got window.")
+        print("input_matrix shape:", input_matrix.shape)
 
-            # ---- Normalize ----
-            print("Normalizing...")
-            max_val = np.max(np.abs(input_window))
-            if max_val > 0:
-                input_window = input_window / max_val
-                print("Normalized.")
-            else:
-                print("Silent input (max amplitude = 0). Skipping.")
-                continue
+        # Set tensor & run inference
+        print("Setting tensor...")
+        interpreter.set_tensor(input_details[0]["index"], input_matrix)
+        interpreter.invoke()
+        print("Set.")
 
-            # ---- Zero-out outside active region (mimic training padding behavior) ----
-            print("Zeroing out...")
-            input_window = zero_out(input_window, threshold=THRESH, sr=SAMPLE_RATE)
-            print("Zerod out.")
+    # Get output probabilities
+        y_pred = interpreter.get_tensor(output_details[0]["index"])[0]
+        print("Ran inference successfully.")
 
-            print("Getting MFCCs...")
-            # ---- MFCC extraction ----
-            mfccs = extract_mfccs(audio_data=input_window)
-            print("Got MFCCs.")
-            print("MFCCs shape:", mfccs.shape)
+        pred_idx = int(np.argmax(y_pred))
+        pred_label = idx_to_label[pred_idx]
 
-            if mfccs.shape != (N_MFCC, T_FRAMES):
-                print(f"Skipping: unexpected MFCC shape {mfccs.shape}")
-                continue
+        print("\nModel output probabilities:", y_pred)
+        print(f"\n--- PREDICTION: {pred_label} ---\n")
 
-            # ---- Prepare batch for TFLite ----
-            input_matrix = mfccs.reshape(
-                1, N_MFCC, T_FRAMES, 1
-            ).astype(DATA_TYPE)
+        # Big switch to control peripherals
 
-            print("input_matrix shape:", input_matrix.shape)
+        # Red
+        if pred_idx == 0:
+            set_color(100, 0, 0)
 
-            # Set tensor & run inference
-            print("Setting tensor...")
-            interpreter.set_tensor(input_details[0]["index"], input_matrix)
-            interpreter.invoke()
-            print("Set.")
+        # Green
+        elif pred_idx == 1:
+            set_color(0, 100, 0)
+        
+        # Blue
+        elif pred_idx == 2:
+            set_color(0, 0, 100)
+        
+        # White
+        elif pred_idx == 3:
+            set_color(100, 100, 100)
 
-            # Get output probabilities
-            y_pred = interpreter.get_tensor(output_details[0]["index"])[0]
-            print("Ran inference successfully.")
+        # Off
+        elif pred_idx == 4:
+            set_color(0, 0, 0)
+            set_color(0, 0, 0)
+            set_color(0, 0, 0)
 
-            pred_idx = int(np.argmax(y_pred))
-            pred_label = idx_to_label[pred_idx]
+        # Time
+        elif pred_idx == 5:
+            print(f"\nCurrent time is{datetime.datetime.now()}")
 
-            print("\nModel output probabilities:", y_pred)
-            print(f"--- PREDICTION: {pred_label} ---\n")
 
-    finally:
-        # Cleanup ALSA + audio
-        try:
-            if asound is not None:
-                asound.snd_lib_error_set_handler(None)
-        except Exception:
-            pass
 
-        if stream is not None and stream.is_active():
-            stream.stop_stream()
-            stream.close()
 
-        p.terminate()
-        print("PyAudio cleaned up.")
+
