@@ -5,6 +5,11 @@ import librosa
 import sounddevice as sd
 import RPi.GPIO as GPIO
 import datetime
+from enum import IntEnum
+import python_weather
+import asyncio
+from RPLCD.i2c import CharLCD
+import time
 
 import warnings
 
@@ -12,10 +17,9 @@ import warnings
 warnings.filterwarnings(
     "ignore",
     message="The value of the smallest subnormal",
-    category=UserWarning,
+    category=UserWarning,   
     module="numpy.core.getlimits"
 )
-
 
 # Audio Processing / model I/O
 SAMPLE_RATE = 22050           # Must match training
@@ -28,12 +32,29 @@ T_FRAMES = 154
 INPUT_LENGTH = 39243 # samples
 THRESH        = 0.12            # Silence threshold for zero_out()
 
-# --- GPIO pin setup ---
+# GPIO pin setup 
 RED_PIN = 10
 GREEN_PIN = 9
 BLUE_PIN = 11
+BUTTON_PIN = 12
+
+# Configure LCD
+I2C_ADDRESS = 0x27
+I2C_PORT = 1
 
 # Helpers
+
+# Define enum for handling commands
+class Command(IntEnum):
+    RED         = 0
+    GREEN       = 1
+    BLUE        = 2
+    WHITE       = 3
+    OFF         = 4
+    TIME        = 5
+    TEMPERATURE = 6
+    UNKNOWN     = 7
+    NOISE       = 8
 
 def leaky_integrator(input_signal, dt, tau):
     """
@@ -176,7 +197,7 @@ def extract_loudest_window_leaky(
     return window
 
 
-def zero_out(audio_data, threshold=THRESH, fade_len=300, wait_ms=80, sr=SAMPLE_RATE):
+def zero_out(audio_data, threshold=THRESH, fade_len=300, wait_ms=100, sr=SAMPLE_RATE):
     """
     Force artificial silence at beginning/end and keep the middle region where
     |audio| >= threshold, with a linear fade in/out.
@@ -238,10 +259,11 @@ def zero_out(audio_data, threshold=THRESH, fade_len=300, wait_ms=80, sr=SAMPLE_R
 # Set pin 
 GPIO.setmode(GPIO.BCM)
 
-# Setup pins as outputs
+# Setup pins 
 GPIO.setup(RED_PIN, GPIO.OUT)
 GPIO.setup(GREEN_PIN, GPIO.OUT)
 GPIO.setup(BLUE_PIN, GPIO.OUT)
+GPIO.setup(BUTTON_PIN, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
 # --- Set up PWM on each channel ---
 FREQ = 1000  # 1 kHz PWM frequency
@@ -249,16 +271,19 @@ red = GPIO.PWM(RED_PIN, FREQ)
 green = GPIO.PWM(GREEN_PIN, FREQ)
 blue = GPIO.PWM(BLUE_PIN, FREQ)
 
-# Start PWM with 0% duty cycle (off)
-red.start(0)
-green.start(0)
-blue.start(0)
 
 def set_color(r, g, b):
     """Set RGB LED color using 0-100% duty cycle for each channel"""
     red.ChangeDutyCycle(r)
     green.ChangeDutyCycle(g)
     blue.ChangeDutyCycle(b)
+
+# Weather data
+async def get_weather(city_name="Evanston, IL"):
+    async with python_weather.Client(unit=python_weather.IMPERIAL) as client:
+        weather = await client.get(city_name)
+
+    return int(weather.temperature)
 
 
 if __name__ == "__main__":
@@ -268,7 +293,7 @@ if __name__ == "__main__":
     # Preallocate buffer: 1D mono signal
     buffer = np.zeros(BUFFER_LEN, dtype=DATA_TYPE)
 
-        # ---- LOAD TFLITE MODEL ----
+    # Load model
     print(f"\nLoading TFLite model from: {MODEL_PATH}")
     interpreter = tflite.Interpreter(model_path=MODEL_PATH)
     interpreter.allocate_tensors()
@@ -280,18 +305,14 @@ if __name__ == "__main__":
     print("Input tensor details:", input_details)
     print("Output tensor details:", output_details, "\n")
 
-    # Check we are feeding the right dtype
-    model_input_dtype = input_details[0]["dtype"]
-    print("Model expects input dtype:", model_input_dtype)
-
-    # Label mapping (same as training script)
+    # Label mapping 
     label_mapping = {
         'red': 0, 'green': 1, 'blue': 2, 'white': 3, 'off': 4,
         'time': 5, 'temperature': 6, 'unknown': 7, 'noise': 8
     }
     idx_to_label = {v: k for k, v in label_mapping.items()}
 
-    # --- Print devices ---
+    # Print devices
     devices = sd.query_devices()
     print("Available devices:\n")
     for idx, dev in enumerate(devices):
@@ -302,122 +323,270 @@ if __name__ == "__main__":
     print("\nDefault input device index:", default_input)
     print("Default input device info:", devices[default_input])
 
-    while True:
+    # Get weather data for Evanston, IL
+    print("Getting weather data...")
+    city = "Evanston, IL"
+    temp = asyncio.run(get_weather(city))
+    print("Got temperature.")
 
-        # --- Record into buffer using InputStream ---
-        print(f"\nRecording {LENGTH_S} seconds of audio at {SAMPLE_RATE} Hz...\n")
+    # Start PWM with 0% duty cycle (off)
+    red.start(0)
+    green.start(0)
+    blue.start(0)
 
-        frames_to_read = BUFFER_LEN
-        offset = 0
-        blocksize = 1024  # you can tweak this
+    # Initialize LCD
+    print("Initializing LCD..")
+    lcd = CharLCD(i2c_expander = 'PCF8574', address = I2C_ADDRESS, port=I2C_PORT, cols=16,
+                  rows=2, dotsize = 8, 
+                  charmap = 'A00', auto_linebreaks=True, backlight_enabled = True)
+    
+    
+    lcd.clear()
+    time.sleep(5)
+    print("LCD Initialized")
 
-        # Open an InputStream on the default input device
-        with sd.InputStream(
-            samplerate=SAMPLE_RATE,
-            channels=1,
-            dtype=DATA_TYPE,
-        ) as stream:
+    # Start the float processing warnings before main loop
+    print("Starting...")
+    lcd.write_string("Starting...")
+    dummy_mfcc = extract_mfccs(audio_data=buffer[:INPUT_LENGTH])
 
-            while offset < frames_to_read:
-                # How many frames to grab in this iteration
-                frames = min(blocksize, frames_to_read - offset)
+    # Prompt user for the first call
+    lcd.clear()
+    lcd.write_string("Press button and")
+    lcd.crlf()
+    lcd.write_string("issue command.")
 
-                data, overflowed = stream.read(frames)
-                if overflowed:
-                    print("Warning: overflow detected while recording")
+    # blink purple 3 times
+    set_color(75, 0, 100)
+    time.sleep(0.5)
+    set_color(0, 0, 0)
+    time.sleep(0.5)
 
-                # data.shape = (frames, channels), channels=1 here
-                buffer[offset:offset+frames] = data[:, 0]
-                offset += frames
+    set_color(75, 0, 100)
+    time.sleep(0.5)
+    set_color(0, 0, 0)
+    time.sleep(0.5)
 
-        print("Recording done. ")
+    set_color(75, 0, 100)
+    time.sleep(0.5)
+    set_color(0, 0, 0)
 
-        # Get window
-        input_window = extract_loudest_window_leaky(
-            audio_data=buffer,
-            sr=SAMPLE_RATE,
-            tau_ms=200.0,
-        )
+    # Main real-time loop
+    prompt_shown = False # For terimal/debugging
+    try: 
+        while True:
+            # Set recording flag
+            rec = False
 
-        print("Got window.")
+            # Debugg print
+            if not prompt_shown:
+                print("\nPress the button to run inference: ")
+                prompt_shown = True
 
-        # Normalize 
-        print("Normalizing...")
-        max_val = np.max(np.abs(input_window))
-        if max_val > 0:
-            input_window = input_window / max_val
-            print("Normalized.")
-        else:
-            print("Silent input (max amplitude = 0). Skipping.")
+            # Get button info
+            if GPIO.input(BUTTON_PIN) == GPIO.LOW:
+                rec = True
+                lcd.clear()
 
-        # Zero out 
-        print("Zeroing out...")
-        input_window = zero_out(input_window, threshold=THRESH, sr=SAMPLE_RATE)
-        print("Zerod out.")
-        
-        print("Getting MFCCs...")
-        # ---- MFCC extraction ----
-        mfccs = extract_mfccs(audio_data=input_window)
-        print("Got MFCCs.")
+            # Run inference on recorded audio and perform command
+            if rec:
 
-        if mfccs.shape != (N_MFCC, T_FRAMES):
-            print(f"Skipping: unexpected MFCC shape {mfccs.shape}")
-            
+                # Record into buffer using InputStream 
+                print(f"\nRecording {LENGTH_S} seconds of audio at {SAMPLE_RATE} Hz...\n")
 
-        print(f"MFCCs shape = {mfccs.shape}")
+                frames_to_read = BUFFER_LEN
+                offset = 0
+                blocksize = 1024  
 
-        # Shape tensor
-        input_matrix = mfccs.reshape(
-            1, N_MFCC, T_FRAMES, 1
-        ).astype(DATA_TYPE)
+                # Open an InputStream on the default input device
+                with sd.InputStream(
+                    samplerate=SAMPLE_RATE,
+                    channels=1,
+                    dtype=DATA_TYPE,
+                ) as stream:
 
-        print("input_matrix shape:", input_matrix.shape)
+                    while offset < frames_to_read:
+                        # How many frames to grab in this iteration
+                        frames = min(blocksize, frames_to_read - offset)
 
-        # Set tensor & run inference
-        print("Setting tensor...")
-        interpreter.set_tensor(input_details[0]["index"], input_matrix)
-        interpreter.invoke()
-        print("Set.")
+                        data, overflowed = stream.read(frames)
+                        if overflowed:
+                            print("Warning: overflow detected while recording")
 
-    # Get output probabilities
-        y_pred = interpreter.get_tensor(output_details[0]["index"])[0]
-        print("Ran inference successfully.")
+                        # data.shape = (frames, channels), channels=1 here
+                        buffer[offset:offset+frames] = data[:, 0]
+                        offset += frames
 
-        pred_idx = int(np.argmax(y_pred))
-        pred_label = idx_to_label[pred_idx]
+                print("Recording done. ")
+                
+                # Print LCD message
+                lcd.clear()
+                lcd.write_string("Processing ")
 
-        print("\nModel output probabilities:", y_pred)
-        print(f"\n--- PREDICTION: {pred_label} ---\n")
+                # Get window
+                input_window = extract_loudest_window_leaky(
+                    audio_data=buffer,
+                    sr=SAMPLE_RATE,
+                    tau_ms=200.0,
+                )
 
-        # Big switch to control peripherals
+                # Print LCD load bar
+                lcd.write_string('*')
 
-        # Red
-        if pred_idx == 0:
-            set_color(100, 0, 0)
+                print("Got window.")
 
-        # Green
-        elif pred_idx == 1:
-            set_color(0, 100, 0)
-        
-        # Blue
-        elif pred_idx == 2:
-            set_color(0, 0, 100)
-        
-        # White
-        elif pred_idx == 3:
-            set_color(100, 100, 100)
+                # Normalize 
+                print("Normalizing...")
+                max_val = np.max(np.abs(input_window))
+                if max_val > 0:
+                    input_window = input_window / max_val
+                    print("Normalized.")
+                else:
+                    print("Silent input (max amplitude = 0). Skipping.")
 
-        # Off
-        elif pred_idx == 4:
+                # Print LCD load bar
+                lcd.write_string('*')
+
+                # Zero out 
+                print("Zeroing out...")
+                input_window = zero_out(input_window, threshold=THRESH, sr=SAMPLE_RATE)
+                print("Zerod out.")
+
+                # Print LCD load bar
+                lcd.write_string('*')
+                
+                # MFCC Extraction
+                print("Getting MFCCs...")
+                mfccs = extract_mfccs(audio_data=input_window)
+                print("Got MFCCs.")
+
+                # Print LCD load bar
+                lcd.write_string('*')
+
+                if mfccs.shape != (N_MFCC, T_FRAMES):
+                    print(f"Skipping: unexpected MFCC shape {mfccs.shape}")
+                
+                # Print LCD load bar
+                lcd.write_string('*')
+                    
+                print(f"MFCCs shape = {mfccs.shape}")
+
+                # Shape tensor
+                input_matrix = mfccs.reshape(
+                    1, N_MFCC, T_FRAMES, 1
+                ).astype(DATA_TYPE)
+
+                print("input_matrix shape:", input_matrix.shape)
+
+                # Print LCD load bar
+                lcd.write_string('*')
+
+                # Set tensor & run inference
+                print("Setting tensor...")
+                interpreter.set_tensor(input_details[0]["index"], input_matrix)
+                interpreter.invoke()
+                print("Set.")
+
+                # Print LCD load bar
+                lcd.write_string('*')
+
+                # Get output probabilities
+                y_pred = interpreter.get_tensor(output_details[0]["index"])[0]
+                print("Ran inference successfully.")
+
+                # Print LCD load bar
+                lcd.write_string('*')
+
+                pred_idx = int(np.argmax(y_pred))
+                pred_label = idx_to_label[pred_idx]
+
+                print("\nModel output probabilities:", y_pred)
+                print(f"\n--- PREDICTION: {pred_label} ---\n")
+
+                # Print LCD load bar
+                lcd.write_string('*')
+
+                # Execute commands
+                lcd.clear()
+                cmd = Command(pred_idx)
+
+                match cmd:
+                    case Command.RED:
+                        lcd.write_string("Setting light to")
+                        lcd.crlf()
+                        lcd.write_string("red.")
+                        set_color(100, 0, 0)
+
+                    case Command.GREEN:
+                        lcd.write_string("Setting light to")
+                        lcd.crlf()
+                        lcd.write_string("green.")
+                        set_color(0, 100, 0)
+
+                    case Command.BLUE:
+                        lcd.write_string("Setting light to")
+                        lcd.crlf()
+                        lcd.write_string("blue.")
+                        set_color(0, 0, 100)
+
+                    case Command.WHITE:
+                        lcd.write_string("Setting light to")
+                        lcd.crlf()
+                        lcd.write_string("white.")
+                        set_color(100, 100, 100)
+
+                    case Command.OFF:
+                        lcd.write_string("Turning light")
+                        lcd.crlf()
+                        lcd.write_string("off.")
+                        set_color(0, 0, 0)
+
+                    case Command.TIME:
+                        now = datetime.datetime.now()
+                        t_str = now.strftime("%H:%M")   
+                        lcd.clear()
+                        lcd.write_string("Current time is")
+                        lcd.crlf()
+                        lcd.write_string(t_str)
+                        print(f"\nCurrent time is {t_str}\n")
+
+                    case Command.TEMPERATURE:
+                        lcd.clear()
+                        lcd.write_string(city)
+                        lcd.crlf()
+                        temp_line_2 = f"Temperature {temp}°F"
+                        lcd.write_string(temp_line_2)
+                        print(f"Temperature = {temp_line_2}")
+
+                    case Command.UNKNOWN:
+                        lcd.clear()
+                        lcd.write_string("Sorry, I did not get that.")
+                        print("\nSorry, I did not get that.\n")
+
+                    case Command.NOISE:
+                        lcd.clear()
+                        lcd.write_string("No command detected.")
+                        print("\nNo command detected.\n")
+
+                # Reset recording flag
+                rec = False
+
+    except KeyboardInterrupt:
+        print("\n\nKeyboardInterrupt received. Exiting...")
+
+    finally:
+        # Cleanup
+        try:
+            lcd.clear()
+        except Exception as e:
+            print(f"LCD cleanup error: {e}")
+        # Turn LED off
+        try:
             set_color(0, 0, 0)
-            set_color(0, 0, 0)
-            set_color(0, 0, 0)
+        except Exception as e:
+            print(f"LED cleanup error: {e}")
 
-        # Time
-        elif pred_idx == 5:
-            print(f"\nCurrent time is{datetime.datetime.now()}")
-
-
-
-
+        # Release GPIO pins
+        GPIO.cleanup()
+        print("GPIO cleaned up, goodbye!")
 
