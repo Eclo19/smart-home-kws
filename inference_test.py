@@ -50,7 +50,7 @@ def plot_signal_and_loudest_window_leaky(
     tau_ms=200.0,
     win_size=INPUT_LENGTH,
     title="Signal + Leaky Integrator Loudest Window", 
-    plot=False
+    plot=True
 ):
     """
     Plot a signal, its leaky-integrated energy, and highlight the region
