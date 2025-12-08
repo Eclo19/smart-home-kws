@@ -388,8 +388,15 @@ if __name__ == "__main__":
                 rec = True
                 lcd.clear()
 
+                if not rec:
+                    time.sleep(0.01)  # 10 ms debounce / CPU break
+                    continue
+
             # Run inference on recorded audio and perform command
             if rec:
+
+                # Avoid capturing the button press sound
+                time.sleep(0.15)  
 
                 # Record into buffer using InputStream 
                 print(f"\nRecording {LENGTH_S} seconds of audio at {SAMPLE_RATE} Hz...\n")
@@ -422,6 +429,7 @@ if __name__ == "__main__":
                 # Print LCD message
                 lcd.clear()
                 lcd.write_string("Processing ")
+                lcd.crlf()
 
                 # Get window
                 input_window = extract_loudest_window_leaky(
@@ -533,7 +541,7 @@ if __name__ == "__main__":
                         lcd.write_string("Setting light to")
                         lcd.crlf()
                         lcd.write_string("white.")
-                        set_color(100, 100, 100)
+                        set_color(100, 80, 100)
 
                     case Command.OFF:
                         lcd.write_string("Turning light")
@@ -570,6 +578,7 @@ if __name__ == "__main__":
 
                 # Reset recording flag
                 rec = False
+                prompt_shown = False
 
     except KeyboardInterrupt:
         print("\n\nKeyboardInterrupt received. Exiting...")
