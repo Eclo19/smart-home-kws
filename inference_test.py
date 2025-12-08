@@ -6,8 +6,6 @@ import keras
 import librosa
 import os 
 
-print("\nAll good\n")
-
 SAMPLE_RATE = 22050
 DATA_TYPE = np.float32
 INPUT_LENGTH = 39243  # number of samples expected by your MFCC setup
