@@ -405,7 +405,7 @@ def add_noise(audio_data, scale=0.35):
     """
 
     white_noise = np.random.randn(audio_data.size)
-    print("Adding red noise...")
+    print("Adding Red Noise...")
     red_noise = low_pass(white_noise, path="smart-home-kws/Filters/lp7.csv")
 
     if False:
@@ -416,8 +416,6 @@ def add_noise(audio_data, scale=0.35):
     return noisy_audio_data
 
 if __name__ == "__main__":
-
-
 
     # Test lowpass
     if False:
