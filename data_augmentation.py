@@ -244,7 +244,7 @@ def augment_data_set(roll=True):
 
     return
 
-def low_pass(audio_data, path="Filters/lp7.csv"):
+def low_pass(audio_data, path="smart-home-kws/Filters/lp7.csv"):
 
     """
     Assumes audio_data is sanitized. 
@@ -292,7 +292,7 @@ def low_pass(audio_data, path="Filters/lp7.csv"):
     return y.astype(np.float32)
     
 
-def high_pass(audio_data, path="Filters/hp8.csv"):
+def high_pass(audio_data, path="smart-home-kws/Filters/hp8.csv"):
     """
     Assumes audio_data is sanitized. 
 
@@ -340,7 +340,7 @@ def high_pass(audio_data, path="Filters/hp8.csv"):
     y = lfilter(b, [1.0], audio_data)
     return y.astype(np.float32)
 
-def band_pass(audio_data,path="Filters/bp1.csv"):
+def band_pass(audio_data,path="smart-home-kws/Filters/bp1.csv"):
 
     """
     Assumes audio_data is sanitized. 
@@ -606,5 +606,4 @@ if __name__ == "__main__":
     if False:
         augment_data_set()
 
-    print("All good")
     
